@@ -6,6 +6,7 @@
 #define RTPDSP_H
 
 #include <cstdio>
+#include <cstdint>
 #include <cuda.h>
 
 
@@ -25,11 +26,9 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 
 
 typedef struct {
-    unsigned char *header;
-    unsigned char *payload;
-    int header_len;
-    int payload_len;
-    int ssrc;
+    uint8_t header[12];
+    uint8_t payload[160];
+    uint32_t ssrc;
 } rtp_packet;
 
 #endif //RTPDSP_H
