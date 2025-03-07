@@ -4,36 +4,50 @@
 
 #include "rtpdsp.h"
 
-uint8_t pcm2ulaw(int16_t pcm) {
-    uint8_t ulawByte;
-    const int cBias = 0x84;
-    const int cClip = 32635;
 
-    // Clamp the PCM value
-    if (pcm < -cClip) pcm = -cClip;
-    if (pcm > cClip) pcm = cClip;
+int16_t search(int16_t val, int16_t *table, int16_t size)
+{
+    int16_t i;
 
-    // Get the sign and the magnitude of the PCM value
-    int sign = (pcm < 0) ? 0x80 : 0;
-    if (sign) pcm = -pcm;
-
-    // Add the bias, then clip
-    pcm += cBias;
-    if (pcm > 32767) pcm = 32767;
-
-    // Convert the adjusted magnitude to µ-law
-    int exponent = 7;
-    int mantissa = 0;
-    for (int value = pcm >> 7; value > 0; value >>= 1) {
-        if (--exponent < 0) break;
+    for (i = 0; i < size; i++) {
+        if (val <= *table++)
+            return (i);
     }
-    mantissa = (pcm >> (exponent + 3)) & 0x0F;
-    ulawByte = ~(sign | (exponent << 4) | mantissa);
-
-    return ulawByte;
+    return (size);
 }
 
+uint8_t pcm2ulaw(int16_t pcm_val)	/* 2's complement (16-bit range) */
+{
+    int16_t mask;
+    int16_t seg;
+    uint8_t uval;
 
+    /* Get the sign and the magnitude of the value. */
+    pcm_val = pcm_val >> 2;
+    if (pcm_val < 0) {
+        pcm_val = -pcm_val;
+        mask = 0x7F;
+    } else {
+        mask = 0xFF;
+    }
+    if ( pcm_val > CLIP ) pcm_val = CLIP;		/* clip the magnitude */
+    pcm_val += (BIAS >> 2);
+
+    /* Convert the scaled magnitude to segment number. */
+    seg = search(pcm_val, seg_uend, 8);
+
+    /*
+    * Combine the sign, segment, quantization bits;
+    * and complement the code word.
+    */
+    if (seg >= 8)		/* out of range, return maximum value. */
+        return (unsigned char) (0x7F ^ mask);
+    else {
+        uval = (unsigned char) (seg << 4) | ((pcm_val >> (seg + 1)) & 0xF);
+        return (uval ^ mask);
+    }
+
+}
 
 
 void add_sine_wave(int16_t *buffer, int length, double amplitude, double frequency, double sample_rate) {
@@ -56,32 +70,71 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
 
     uint32_t ssrc_network = htonl(ssrc);
     memcpy(&pkt->header[8], &ssrc_network, sizeof(uint32_t)); // Copy SSRC
+    pkt->ssrc = ssrc;
 
     // simple sine wave composite
-    int16_t buffer[160];
+    int16_t buffer[RTP_PAYLOAD_LEN];
     memset(buffer, 0, sizeof(buffer));
-    add_sine_wave(buffer, 160, 6000, 440, 8000);
+    add_sine_wave(buffer, RTP_PAYLOAD_LEN, 6000, 440, 8000);
 
     double freq = 1000 + ssrc % 2000;
-    add_sine_wave(buffer, 160, 18000, freq, 8000);
+    add_sine_wave(buffer, RTP_PAYLOAD_LEN, 18000, freq, 8000);
 
     // convert to ulaw
-    for (int i = 0; i < 160; i++) {
+    for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
+        // printf("%d ", buffer[i]);
         pkt->payload[i] = pcm2ulaw(buffer[i]);
     }
+    // printf("\n");
 }
 
 int main() {
 
-    int Pc = 100;
+    int PC = 1024;
 
-    // large buffer to write packets to
-    void* pktbuf_h = malloc(sizeof(rtp_packet) * Pc);
+    // buffer to write multiple packets to
+    void* pktbuf_h = malloc(sizeof(rtp_packet) * PC);
     void* pbuf = pktbuf_h;
-    for (int i = 0; i < Pc; i++, pbuf += sizeof(rtp_packet)) {
+    for (int i = 0; i < PC; i++, pbuf += sizeof(rtp_packet)) {
         uint32_t ssrc = i;
         mk_rtp_packet((rtp_packet*)pbuf, ssrc);
     }
+
+    // copy to device
+    void* pktbuf_d;
+    CUDA_ERR_CHK( cudaMalloc(&pktbuf_d, sizeof(rtp_packet) * PC) );
+    CUDA_ERR_CHK( cudaMemcpy(pktbuf_d, pktbuf_h, sizeof(rtp_packet) * PC, cudaMemcpyHostToDevice) );
+
+    // results buffer
+    void* pktspcbuf_h = malloc(sizeof(pktspectrum) * PC);
+    void* pktspcbuf_d;
+    CUDA_ERR_CHK( cudaMalloc(&pktspcbuf_d, sizeof(pktspectrum) * PC) );
+
+    // 1 block per packet, and let's say, 8 threads per block
+    int threadPerBlock = 8;
+    int blocks = PC;
+    kernel_dsp<<<blocks, threadPerBlock>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, PC);
+
+    CUDA_ERR_CHK(cudaGetLastError()); // Check kernel launch errors
+    CUDA_ERR_CHK(cudaDeviceSynchronize()); // Synchronize to capture runtime errors
+
+    // get results
+    CUDA_ERR_CHK( cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * PC, cudaMemcpyDeviceToHost) );
+
+    // for (int i = 0; i < PC; i++) {
+    //     printf("%d\n", ((pktspectrum*)pktspcbuf_h)[i].ssrc);
+    // }
+
+    pktspectrum s10 = ((pktspectrum*)pktspcbuf_h)[10];
+    printf("s10 ssrc: %d\n", s10.ssrc);
+    for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
+        printf("%d ", s10.payload[i]);
+    }
+    printf("\n");
+
+
+
+    printf("ok\n");
 
     return 0;
 }
