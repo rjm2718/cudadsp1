@@ -110,13 +110,35 @@ int main() {
     void* pktspcbuf_d;
     CUDA_ERR_CHK( cudaMalloc(&pktspcbuf_d, sizeof(pktspectrum) * PC) );
 
-    // 1 block per packet, and let's say, 8 threads per block
-    int threadPerBlock = 8;
+
+    // 1 block per packet
     int blocks = PC;
-    kernel_dsp<<<blocks, threadPerBlock>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, PC);
+
+
+    // Timing setup
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start, 0);
+
+    kernel_dsp<<<blocks, THREADS_PER_BLOCK, FFT::shared_memory_size>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, PC);
+
+    cudaEventRecord(stop, 0);
 
     CUDA_ERR_CHK(cudaGetLastError()); // Check kernel launch errors
     CUDA_ERR_CHK(cudaDeviceSynchronize()); // Synchronize to capture runtime errors
+
+    // Wait for the event to complete
+    cudaEventSynchronize(stop);
+
+    // Calculate elapsed time in milliseconds
+    float elapsedTime;
+    cudaEventElapsedTime(&elapsedTime, start, stop);
+
+    std::cout << "Kernel execution time: " << elapsedTime << " ms\n";
+
+
 
     // get results
     CUDA_ERR_CHK( cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * PC, cudaMemcpyDeviceToHost) );
@@ -128,9 +150,9 @@ int main() {
     pktspectrum s10 = ((pktspectrum*)pktspcbuf_h)[10];
     printf("s10 ssrc: %d\n", s10.ssrc);
     for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
-        printf("%d ", s10.payload[i]);
+        // printf("%d ", s10.payload[i]);
     }
-    printf("\n");
+    // printf("\n");
 
 
 

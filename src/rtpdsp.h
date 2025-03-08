@@ -8,10 +8,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <cuda.h>
-
-
-
-#define min(a,b) ((a) < (b) ? (a) : (b))
+#include <cufftdx.hpp>
 
 
 #define CUDA_ERR_CHK(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -24,19 +21,8 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
     }
 }
 
-#define RTP_PAYLOAD_LEN 160
 
-typedef struct {
-    uint8_t header[12];
-    uint8_t payload[RTP_PAYLOAD_LEN];
-    uint32_t ssrc;
-} rtp_packet;
 
-typedef struct {
-    int16_t payload[RTP_PAYLOAD_LEN];
-    float spectrum[RTP_PAYLOAD_LEN/2];
-    uint32_t ssrc;
-} pktspectrum;
 
 
 
@@ -55,7 +41,43 @@ static short seg_uend[8] = {0x3F, 0x7F, 0xFF, 0x1FF,
 
 
 
+#define RTP_PAYLOAD_LEN 1024
+#define THREADS_PER_BLOCK 32
+#define ELEMENTS_PER_THREAD RTP_PAYLOAD_LEN/THREADS_PER_BLOCK
+
+
+using namespace cufftdx;
+
+// R2C and C2R specific properties describing data layout and execution mode for
+// the requested transform.
+using real_fft_options = RealFFTOptions<complex_layout::natural, real_mode::normal>;
+
+using FFT = decltype( Size<RTP_PAYLOAD_LEN>()
+                      + Precision<float>()
+                      + Type<fft_type::r2c>()
+                      + Direction<fft_direction::forward>()
+                      + ElementsPerThread<ELEMENTS_PER_THREAD>()
+                      + SM<750>()
+                      + real_fft_options()
+                      + Block());
+
+
+using complex_type = typename FFT::value_type;
+//using real_type    = typename complex_type::value_type; // i.e. float
+
+typedef struct {
+    uint8_t header[12];
+    uint8_t payload[RTP_PAYLOAD_LEN];
+    uint32_t ssrc;
+} rtp_packet;
+
+typedef struct {
+    int16_t payload[RTP_PAYLOAD_LEN];
+    complex_type spectrum[RTP_PAYLOAD_LEN/2];
+    uint32_t ssrc;
+} pktspectrum;
 
 __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int n);
+
 
 #endif //RTPDSP_H
