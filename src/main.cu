@@ -88,7 +88,7 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
     // printf("\n");
 }
 
-int main() {
+int main2() {
 
     int PC = 1024;
 
