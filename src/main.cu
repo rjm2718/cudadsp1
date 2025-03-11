@@ -3,6 +3,7 @@
 #include <arpa/inet.h>
 
 #include "rtpdsp.h"
+#include "ulaw.h"
 
 
 int16_t search(int16_t val, int16_t *table, int16_t size)
@@ -88,7 +89,7 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
     // printf("\n");
 }
 
-int main2() {
+int main() {
 
     int PC = 1024;
 
@@ -135,13 +136,12 @@ int main2() {
     // Calculate elapsed time in milliseconds
     float elapsedTime;
     cudaEventElapsedTime(&elapsedTime, start, stop);
-
     std::cout << "Kernel execution time: " << elapsedTime << " ms\n";
-
 
 
     // get results
     CUDA_ERR_CHK( cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * PC, cudaMemcpyDeviceToHost) );
+    CUDA_ERR_CHK(cudaDeviceSynchronize()); // Synchronize to capture runtime errors
 
     // for (int i = 0; i < PC; i++) {
     //     printf("%d\n", ((pktspectrum*)pktspcbuf_h)[i].ssrc);

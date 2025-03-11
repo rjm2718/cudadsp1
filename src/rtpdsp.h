@@ -7,8 +7,10 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <iostream>
 #include <cuda.h>
 #include <cufftdx.hpp>
+#include <block_io.hpp>
 
 
 #define CUDA_ERR_CHK(ans) { gpuAssert((ans), __FILE__, __LINE__); }
@@ -22,22 +24,6 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
 }
 
 
-
-
-
-
-#define	SIGN_BIT	(0x80)		/* Sign bit for a A-law byte. */
-#define	QUANT_MASK	(0xf)		/* Quantization field mask. */
-#define	NSEGS		(8)		/* Number of A-law segments. */
-#define	SEG_SHIFT	(4)		/* Left shift for segment number. */
-#define	SEG_MASK	(0x70)		/* Segment field mask. */
-#define	BIAS		(0x84)		/* Bias for linear code. */
-#define CLIP        8159
-
-static short seg_aend[8] = {0x1F, 0x3F, 0x7F, 0xFF,
-                0x1FF, 0x3FF, 0x7FF, 0xFFF};
-static short seg_uend[8] = {0x3F, 0x7F, 0xFF, 0x1FF,
-                0x3FF, 0x7FF, 0xFFF, 0x1FFF};
 
 
 
@@ -63,7 +49,7 @@ using FFT = decltype( Size<RTP_PAYLOAD_LEN>()
 
 
 using complex_type = typename FFT::value_type;
-//using real_type    = typename complex_type::value_type; // i.e. float
+using real_type    = typename complex_type::value_type; // i.e. float
 
 typedef struct {
     uint8_t header[12];

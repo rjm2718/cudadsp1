@@ -8,7 +8,7 @@ set(CMAKE_CUDA_ARCHITECTURES 75)
 
 add_executable(cudadsp1 src/main.cu
         src/dsp.cu
-        src/testfft.cu)
+      )
 
 set_target_properties(cudadsp1 PROPERTIES
                       CUDA_SEPARABLE_COMPILATION ON)

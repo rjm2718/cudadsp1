@@ -1,20 +1,9 @@
 
 #include "rtpdsp.h"
+#include "ulaw.h"
 
-// // cuFFTDx header
-// #include <cufftdx.hpp>
-//
-// using namespace cufftdx;
+using namespace cufftdx;
 
-// FFT description:
-// A 128-point single precision complex-to-complex forward FFT description
-// using FFT = decltype( Size<RTP_PAYLOAD_LEN>()
-//                       + Precision<float>()
-//                       + Type<fft_type::r2c>()
-//                       + Direction<fft_direction::forward>()
-//                       // + ElementsPerThread<8>()
-//                       + SM<750>()
-//                       + Block());
 
 __device__ int16_t ulaw2pcm(uint8_t u_val)
 {
@@ -35,60 +24,45 @@ __device__ int16_t ulaw2pcm(uint8_t u_val)
 
 __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int N) {
 
-    int thrdId = blockIdx.x * blockDim.x + threadIdx.x;
+    int threadId = threadIdx.x;
+    int globalThreadId = blockIdx.x * blockDim.x + threadIdx.x;
     int threadsPerPacket = blockDim.x;
+    int stride = ELEMENTS_PER_THREAD;
 
-    if (thrdId >= N*threadsPerPacket) return;
+    assert(stride==FFT::elements_per_thread);
 
-    int pktId = thrdId/threadsPerPacket;
+    if (globalThreadId >= N*threadsPerPacket) return;
 
+    int pktId = globalThreadId/threadsPerPacket;
     rtp_packet packet = in[pktId];
     pktspectrum* spectrum = &out[pktId];
 
-    // // copy packet payload into shared memory -- this will be for this block/packet, accessible by threadsPerPacket threads
-    // __shared__ float payloadBuffer[RTP_PAYLOAD_LEN];
 
-    // register mem for samples each thread will work on
-    complex_type::value_type threadData[ELEMENTS_PER_THREAD]; // i.e. float
+    complex_type thread_data[FFT::elements_per_thread];
 
     // shared memory for fft
     extern __shared__ __align__(alignof(float4)) complex_type shared_mem[];
 
-    // this threads range/stride in packet.payload
-    int stride = ELEMENTS_PER_THREAD;
-    int offset = (thrdId%threadsPerPacket) * stride;
+    const unsigned int local_fft_id = 0; // with one fft per block/packet, we can hardcode to 0
+    unsigned int idx = threadId; // starting index for this thread
 
-    if (stride != FFT::storage_size) {
-        assert(false);
+    //example::io<FFT>::load(input_data, thread_data, local_fft_id);
+    for (unsigned int i = 0; i < FFT::elements_per_thread; i++) {
+        if ((i * 2 * stride + threadId) < FFT::input_length) {
+            thread_data[i].x = ulaw2pcm(packet.payload[idx]);
+            idx += stride;
+            thread_data[i].y = ulaw2pcm(packet.payload[idx]);
+            idx += stride;
+        }
     }
-    //printf("thrdId: %d, pktId: %d, offset: %d, stride: %d,  ssrc: %d\n", thrdId, pktId, offset, stride, packet.ssrc);
 
-    // decode and copy to shared memory
-    for (int i = offset, l=0; i < offset + stride; i++, l++) {
-        threadData[l] = ulaw2pcm(packet.payload[i]);
-        // payloadBuffer[i] = threadData[l];
+    FFT().execute(thread_data, shared_mem);
+
+    example::io<FFT>::store(thread_data, spectrum->spectrum, local_fft_id);
+
+    if (threadId == 0 || threadId == 15 || threadId == 33) {
+        spectrum->ssrc = packet.ssrc;
+        //printf("ssrc: %d  thrdId: %d  globalThreadId: %d ;  threadsPerPacket=%d  pktId=%d\n", spectrum->ssrc, threadId, globalThreadId, threadsPerPacket, pktId);
     }
     __syncthreads();
-
-    // // further signal processing ...
-    // // dummy load
-    // for (int z=0; z<100; z++) {
-    //     for (int i = offset; i < offset + stride; i++) {
-    //         payloadBuffer[i] *= -1;
-    //     }
-    // }
-
-    // fft
-    FFT().execute(threadData, shared_mem);
-
-    // // copy back to global memory
-    // for (int i = offset; i < offset + stride; i++) {
-    //     spectrum->payload[i] = payloadBuffer[i];
-    // }
-
-    if (thrdId%threadsPerPacket == 0) {
-        spectrum->ssrc = packet.ssrc;
-        //printf("ssrc: %d  thrdId: %d ;  threadsPerPacket=%d  pktId=%d\n", spectrum->ssrc, thrdId, threadsPerPacket, pktId);
-    }
-
 }
