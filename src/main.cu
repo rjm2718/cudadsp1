@@ -78,8 +78,8 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
     memset(buffer, 0, sizeof(buffer));
     add_sine_wave(buffer, RTP_PAYLOAD_LEN, 6000, 440, 8000);
 
-    double freq = 1000 + ssrc % 2000;
-    add_sine_wave(buffer, RTP_PAYLOAD_LEN, 18000, freq, 8000);
+    double freq = 1000 + ssrc % 1000;
+    //add_sine_wave(buffer, RTP_PAYLOAD_LEN, 18000, freq, 8000);
 
     // convert to ulaw
     for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
@@ -89,8 +89,23 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
     // printf("\n");
 }
 
-int main() {
+void printPktSpctrm(void* ps, int n) {
+    char fn[100];
+    sprintf(fn, "spectrum-%d.csv", n);
+    FILE *file = fopen(fn, "w");
+    if (!file) {
+        perror("Failed to open file");
+        return;
+    }
+    pktspectrum s = ((pktspectrum *) ps)[n];
+    for (int i = 0; i < FFT::output_length; i++) {
+        fprintf(file, "%.1f %.1f\n", s.spectrum[i].x, s.spectrum[i].y);
+    }
+    fclose(file);
+    printf("wrote data to %s for ssrc %d\n", fn, s.ssrc);
+}
 
+int main() {
     int PC = 1024;
 
     // buffer to write multiple packets to
@@ -110,6 +125,9 @@ int main() {
     void* pktspcbuf_h = malloc(sizeof(pktspectrum) * PC);
     void* pktspcbuf_d;
     CUDA_ERR_CHK( cudaMalloc(&pktspcbuf_d, sizeof(pktspectrum) * PC) );
+
+    assert(!FFT::requires_workspace);
+    printf("output_length %d\n", FFT::output_length);
 
 
     // 1 block per packet
@@ -147,16 +165,8 @@ int main() {
     //     printf("%d\n", ((pktspectrum*)pktspcbuf_h)[i].ssrc);
     // }
 
-    pktspectrum s10 = ((pktspectrum*)pktspcbuf_h)[10];
-    printf("s10 ssrc: %d\n", s10.ssrc);
-    for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
-        // printf("%d ", s10.payload[i]);
-    }
-    // printf("\n");
-
-
-
-    printf("ok\n");
+    printPktSpctrm(pktspcbuf_h, 10);
+    printPktSpctrm(pktspcbuf_h, 150);
 
     return 0;
 }

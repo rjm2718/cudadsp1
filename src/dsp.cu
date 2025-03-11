@@ -60,7 +60,7 @@ __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int N) {
 
     example::io<FFT>::store(thread_data, spectrum->spectrum, local_fft_id);
 
-    if (threadId == 0 || threadId == 15 || threadId == 33) {
+    if (threadId == 0) {
         spectrum->ssrc = packet.ssrc;
         //printf("ssrc: %d  thrdId: %d  globalThreadId: %d ;  threadsPerPacket=%d  pktId=%d\n", spectrum->ssrc, threadId, globalThreadId, threadsPerPacket, pktId);
     }
