@@ -40,7 +40,7 @@ __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int N) {
 
     complex_type thread_data[FFT::elements_per_thread];
 
-    // shared memory for fft
+    // shared memory for fft.  this is local to the block, so we can use it as-is for the FFT().execute call
     extern __shared__ __align__(alignof(float4)) complex_type shared_mem[];
 
     const unsigned int local_fft_id = 0; // with one fft per block/packet, we can hardcode to 0
@@ -58,7 +58,16 @@ __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int N) {
 
     FFT().execute(thread_data, shared_mem);
 
-    example::io<FFT>::store(thread_data, spectrum->spectrum, local_fft_id);
+    // example::io<FFT>::store(thread_data, spectrum->spectrum, local_fft_id);
+    idx = threadId;
+    for (unsigned int i = 0; i < FFT::elements_per_thread; i++) {
+        if ((i * stride + threadIdx.x) < FFT::output_length) {
+            spectrum->spectrum[idx] = thread_data[i];
+            idx += stride;
+        }
+    }
+
+
 
     if (threadId == 0) {
         spectrum->ssrc = packet.ssrc;

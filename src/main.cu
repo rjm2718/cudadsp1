@@ -76,10 +76,10 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
     // simple sine wave composite
     int16_t buffer[RTP_PAYLOAD_LEN];
     memset(buffer, 0, sizeof(buffer));
-    add_sine_wave(buffer, RTP_PAYLOAD_LEN, 6000, 440, 8000);
+    add_sine_wave(buffer, RTP_PAYLOAD_LEN, 4000, 32, 4096);
 
-    double freq = 1000 + ssrc % 1000;
-    //add_sine_wave(buffer, RTP_PAYLOAD_LEN, 18000, freq, 8000);
+    double freq = 100 + ssrc % 1000;
+    add_sine_wave(buffer, RTP_PAYLOAD_LEN, 8000, freq, 4096);
 
     // convert to ulaw
     for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
@@ -102,36 +102,43 @@ void printPktSpctrm(void* ps, int n) {
         fprintf(file, "%.1f %.1f\n", s.spectrum[i].x, s.spectrum[i].y);
     }
     fclose(file);
-    printf("wrote data to %s for ssrc %d\n", fn, s.ssrc);
+    printf("wrote data to %s for ssrc %d: 8, %.1f\n", fn, s.ssrc, (100+n%1000)/32.0*8.0);
 }
 
 int main() {
-    int PC = 1024;
+    int NUM_PACKETS = 1024;
 
     // buffer to write multiple packets to
-    void* pktbuf_h = malloc(sizeof(rtp_packet) * PC);
+    void* pktbuf_h = malloc(sizeof(rtp_packet) * NUM_PACKETS);
     void* pbuf = pktbuf_h;
-    for (int i = 0; i < PC; i++, pbuf += sizeof(rtp_packet)) {
+    for (int i = 0; i < NUM_PACKETS; i++, pbuf += sizeof(rtp_packet)) {
         uint32_t ssrc = i;
         mk_rtp_packet((rtp_packet*)pbuf, ssrc);
     }
 
+    // rtp_packet p10 = ((rtp_packet*)pktbuf_h)[10];
+    // for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
+    //     printf("%d\n", p10.payload[i]);
+    // }
+    // return 0;
+
     // copy to device
     void* pktbuf_d;
-    CUDA_ERR_CHK( cudaMalloc(&pktbuf_d, sizeof(rtp_packet) * PC) );
-    CUDA_ERR_CHK( cudaMemcpy(pktbuf_d, pktbuf_h, sizeof(rtp_packet) * PC, cudaMemcpyHostToDevice) );
+    CUDA_ERR_CHK( cudaMalloc(&pktbuf_d, sizeof(rtp_packet) * NUM_PACKETS) );
+    CUDA_ERR_CHK( cudaMemcpy(pktbuf_d, pktbuf_h, sizeof(rtp_packet) * NUM_PACKETS, cudaMemcpyHostToDevice) );
 
     // results buffer
-    void* pktspcbuf_h = malloc(sizeof(pktspectrum) * PC);
+    void* pktspcbuf_h = malloc(sizeof(pktspectrum) * NUM_PACKETS);
     void* pktspcbuf_d;
-    CUDA_ERR_CHK( cudaMalloc(&pktspcbuf_d, sizeof(pktspectrum) * PC) );
+    CUDA_ERR_CHK( cudaMalloc(&pktspcbuf_d, sizeof(pktspectrum) * NUM_PACKETS) );
 
     assert(!FFT::requires_workspace);
     printf("output_length %d\n", FFT::output_length);
+    printf("input_length %d\n", FFT::input_length);
 
 
     // 1 block per packet
-    int blocks = PC;
+    int blocks = NUM_PACKETS;
 
 
     // Timing setup
@@ -141,7 +148,7 @@ int main() {
 
     cudaEventRecord(start, 0);
 
-    kernel_dsp<<<blocks, THREADS_PER_BLOCK, FFT::shared_memory_size>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, PC);
+    kernel_dsp<<<blocks, THREADS_PER_BLOCK, FFT::shared_memory_size>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, NUM_PACKETS);
 
     cudaEventRecord(stop, 0);
 
@@ -158,7 +165,7 @@ int main() {
 
 
     // get results
-    CUDA_ERR_CHK( cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * PC, cudaMemcpyDeviceToHost) );
+    CUDA_ERR_CHK(cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * NUM_PACKETS, cudaMemcpyDeviceToHost));
     CUDA_ERR_CHK(cudaDeviceSynchronize()); // Synchronize to capture runtime errors
 
     // for (int i = 0; i < PC; i++) {
@@ -167,6 +174,7 @@ int main() {
 
     printPktSpctrm(pktspcbuf_h, 10);
     printPktSpctrm(pktspcbuf_h, 150);
+    printPktSpctrm(pktspcbuf_h, 450);
 
     return 0;
 }
