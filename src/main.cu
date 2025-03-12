@@ -106,6 +106,9 @@ void printPktSpctrm(void* ps, int n) {
     printf("wrote data to %s for ssrc %d: 8, %.1f\n", fn, s.ssrc, (100+n%1000)/32.0*8.0);
 }
 
+/* loop: memcpy, invoke kernel, memcpy
+ * TODO: multiple streams to overlap memcpys
+ */
 void processPackets(void* pktbuf_h, void* pktbuf_d, void* pktspcbuf_h, void* pktspcbuf_d, int n_packets, int n_iterations) {
 
     for (int i = 0; i < n_iterations; i++) {
