@@ -72,6 +72,7 @@ To build and run the `cudadsp1` project, the following are required:
    make
    ```
 ## running
+Pass the number of host memcpy/kernel iterations should be done (defaults to 4).
 ```bash
 $./cudadsp1 4
 

@@ -38,6 +38,7 @@ using namespace cufftdx;
 // the requested transform.
 using real_fft_options = RealFFTOptions<complex_layout::natural, real_mode::normal>;
 
+// FFT configuration -- see https://docs.nvidia.com/cuda/cufftdx/index.html for details
 using FFT = decltype( Size<RTP_PAYLOAD_LEN>()
                       + Precision<float>()
                       + Type<fft_type::r2c>()
@@ -51,18 +52,22 @@ using FFT = decltype( Size<RTP_PAYLOAD_LEN>()
 using complex_type = typename FFT::value_type;
 using real_type    = typename complex_type::value_type; // i.e. float
 
+// RTP packet for VoIP
 typedef struct {
-    uint8_t header[12];
+    uint8_t header[12]; // see https://en.wikipedia.org/wiki/Real-time_Transport_Protocol#Packet_header
     uint8_t payload[RTP_PAYLOAD_LEN];
     uint32_t ssrc;
 } rtp_packet;
 
+// results of transform
 typedef struct {
     complex_type spectrum[FFT::output_length];
     uint32_t ssrc;
 } pktspectrum;
 
 __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int n);
+
+typedef int16_t (*decode_sample_op)(uint8_t);
 
 
 #endif //RTPDSP_H

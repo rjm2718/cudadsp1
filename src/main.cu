@@ -1,3 +1,12 @@
+/* CUDA project to demonstrate DSP operations on simulated RTP voice packets.
+ *
+ * Most parallelism comes from processing of many packets at once; each block processes only 1 packet (using audio
+ * data buffer of 1024 samples) using 32 threads.  The GPU kernel performs DSP, repeatedly in order to simulate a
+ * generic load while strategies for high GPU occupancy can be explored.
+ *
+ * Ryan Mitchell, April 2025
+ */
+
 #include <iostream>
 #include <cmath>
 #include <arpa/inet.h>
@@ -7,51 +16,8 @@
 #include "ulaw.h"
 
 
-int16_t search(int16_t val, int16_t *table, int16_t size)
-{
-    int16_t i;
 
-    for (i = 0; i < size; i++) {
-        if (val <= *table++)
-            return (i);
-    }
-    return (size);
-}
-
-uint8_t pcm2ulaw(int16_t pcm_val)	/* 2's complement (16-bit range) */
-{
-    int16_t mask;
-    int16_t seg;
-    uint8_t uval;
-
-    /* Get the sign and the magnitude of the value. */
-    pcm_val = pcm_val >> 2;
-    if (pcm_val < 0) {
-        pcm_val = -pcm_val;
-        mask = 0x7F;
-    } else {
-        mask = 0xFF;
-    }
-    if ( pcm_val > CLIP ) pcm_val = CLIP;		/* clip the magnitude */
-    pcm_val += (BIAS >> 2);
-
-    /* Convert the scaled magnitude to segment number. */
-    seg = search(pcm_val, seg_uend, 8);
-
-    /*
-    * Combine the sign, segment, quantization bits;
-    * and complement the code word.
-    */
-    if (seg >= 8)		/* out of range, return maximum value. */
-        return (unsigned char) (0x7F ^ mask);
-    else {
-        uval = (unsigned char) (seg << 4) | ((pcm_val >> (seg + 1)) & 0xF);
-        return (uval ^ mask);
-    }
-
-}
-
-
+// add sine wave to buffer
 void add_sine_wave(int16_t *buffer, int length, double amplitude, double frequency, double sample_rate) {
     const double two_pi = 2.0 * M_PI;
     for (int i = 0; i < length; i++) {
@@ -60,6 +26,7 @@ void add_sine_wave(int16_t *buffer, int length, double amplitude, double frequen
     }
 }
 
+// fill in header and payload, creating audio samples with sine waves of varying frequency
 void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
 
     // Set the header fields
@@ -84,12 +51,11 @@ void mk_rtp_packet(rtp_packet *pkt, uint32_t ssrc) {
 
     // convert to ulaw
     for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
-        // printf("%d ", buffer[i]);
         pkt->payload[i] = pcm2ulaw(buffer[i]);
     }
-    // printf("\n");
 }
 
+// debug -- write complex spectrum to output file, indexed by ssrc (use plt.py script to plot)
 void printPktSpctrm(void* ps, int n) {
     char fn[100];
     sprintf(fn, "spectrum-%d.csv", n);
@@ -122,7 +88,6 @@ void processPackets(void* pktbuf_h, void* pktbuf_d, void* pktspcbuf_h, void* pkt
         // cudaEventRecord(start, 0);
 
         kernel_dsp<<<n_packets, THREADS_PER_BLOCK, FFT::shared_memory_size>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, n_packets);
-
         // cudaEventRecord(stop, 0);
 
         CUDA_ERR_CHK(cudaGetLastError()); // Check kernel launch errors
@@ -148,7 +113,7 @@ int main(int argc, char** argv) {
         n_iterations = std::stoi(argv[1]);
     }
 
-    int NUM_PACKETS = 20000;
+    int NUM_PACKETS = 20000; // average per-packet time should be less than 20ms (typical ptime for rtp packets)
 
     // allocate host buffer and generate test packets
     void* pktbuf_h = malloc(sizeof(rtp_packet) * NUM_PACKETS);
@@ -187,17 +152,12 @@ int main(int argc, char** argv) {
     processPackets(pktbuf_h, pktbuf_d, pktspcbuf_h, pktspcbuf_d, NUM_PACKETS, n_iterations);
 
     auto end_time = std::chrono::high_resolution_clock::now();
-
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
     auto us_per_packet = (double)duration / NUM_PACKETS / n_iterations * 1000.0;
     printf("\niterations: %d\n", n_iterations);
     printf("total time: %d ms (%.1f ms per iteration, %.1f μs per packet)\n", duration, (float)duration/n_iterations, us_per_packet);
 
-
-
     // printPktSpctrm(pktspcbuf_h, 10);
-    // printPktSpctrm(pktspcbuf_h, 150);
-    // printPktSpctrm(pktspcbuf_h, 450);
 
     return 0;
 }
