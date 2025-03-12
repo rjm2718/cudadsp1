@@ -27,8 +27,6 @@ Thus far, simulating a dsp load by having the kernel do 25 loops of decode & FFT
 in less than 40ms with an RTX 2080 card.  Nvidia Nsight sys/compute are indicating that warp occupancy is at 50%, so
 there's room for improvement.
 
-There are 20K packets created.  Sample payload and spectrum results can be found in `run/` directory.  That data corresponds to the following graphs:
-
 <img height="50%" width="25%" src="doc/testsignal1.png"/>
 <img height="50%" width="25%" src="doc/spectrum1.png"/>
 
