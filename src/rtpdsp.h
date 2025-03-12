@@ -58,7 +58,6 @@ typedef struct {
 } rtp_packet;
 
 typedef struct {
-    int16_t payload[RTP_PAYLOAD_LEN];
     complex_type spectrum[FFT::output_length];
     uint32_t ssrc;
 } pktspectrum;

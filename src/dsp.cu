@@ -46,32 +46,35 @@ __global__ void kernel_dsp(rtp_packet *in, pktspectrum *out, int N) {
     const unsigned int local_fft_id = 0; // with one fft per block/packet, we can hardcode to 0
     unsigned int idx = threadId; // starting index for this thread
 
-    //example::io<FFT>::load(input_data, thread_data, local_fft_id);
-    for (unsigned int i = 0; i < FFT::elements_per_thread; i++) {
-        if ((i * 2 * stride + threadId) < FFT::input_length) {
-            thread_data[i].x = ulaw2pcm(packet.payload[idx]);
-            idx += stride;
-            thread_data[i].y = ulaw2pcm(packet.payload[idx]);
-            idx += stride;
+    for (int iteration = 0; iteration < 25; iteration++) {
+        //example::io<FFT>::load(input_data, thread_data, local_fft_id);
+        idx = threadId;
+        for (unsigned int i = 0; i < FFT::elements_per_thread; i++) {
+            if ((i * 2 * stride + threadId) < FFT::input_length) {
+                thread_data[i].x = ulaw2pcm(packet.payload[idx]);
+                idx += stride;
+                thread_data[i].y = ulaw2pcm(packet.payload[idx]);
+                idx += stride;
+            }
+        }
+
+        FFT().execute(thread_data, shared_mem);
+
+        // example::io<FFT>::store(thread_data, spectrum->spectrum, local_fft_id);
+        idx = threadId;
+        for (unsigned int i = 0; i < FFT::elements_per_thread; i++) {
+            if ((i * stride + threadIdx.x) < FFT::output_length) {
+                spectrum->spectrum[idx] = thread_data[i];
+                idx += stride;
+            }
+        }
+
+
+
+        if (threadId == 0) {
+            spectrum->ssrc = packet.ssrc;
+            //printf("ssrc: %d  thrdId: %d  globalThreadId: %d ;  threadsPerPacket=%d  pktId=%d\n", spectrum->ssrc, threadId, globalThreadId, threadsPerPacket, pktId);
         }
     }
-
-    FFT().execute(thread_data, shared_mem);
-
-    // example::io<FFT>::store(thread_data, spectrum->spectrum, local_fft_id);
-    idx = threadId;
-    for (unsigned int i = 0; i < FFT::elements_per_thread; i++) {
-        if ((i * stride + threadIdx.x) < FFT::output_length) {
-            spectrum->spectrum[idx] = thread_data[i];
-            idx += stride;
-        }
-    }
-
-
-
-    if (threadId == 0) {
-        spectrum->ssrc = packet.ssrc;
-        //printf("ssrc: %d  thrdId: %d  globalThreadId: %d ;  threadsPerPacket=%d  pktId=%d\n", spectrum->ssrc, threadId, globalThreadId, threadsPerPacket, pktId);
-    }
-    __syncthreads();
+    // __syncthreads();
 }

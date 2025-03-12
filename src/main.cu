@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cmath>
 #include <arpa/inet.h>
+#include <chrono>
 
 #include "rtpdsp.h"
 #include "ulaw.h"
@@ -105,10 +106,48 @@ void printPktSpctrm(void* ps, int n) {
     printf("wrote data to %s for ssrc %d: 8, %.1f\n", fn, s.ssrc, (100+n%1000)/32.0*8.0);
 }
 
-int main() {
-    int NUM_PACKETS = 1024;
+void processPackets(void* pktbuf_h, void* pktbuf_d, void* pktspcbuf_h, void* pktspcbuf_d, int n_packets, int n_iterations) {
 
-    // buffer to write multiple packets to
+    for (int i = 0; i < n_iterations; i++) {
+
+        CUDA_ERR_CHK( cudaMemcpy(pktbuf_d, pktbuf_h, sizeof(rtp_packet) * n_packets, cudaMemcpyHostToDevice) );
+
+        // Timing setup
+        // cudaEvent_t start, stop;
+        // cudaEventCreate(&start);
+        // cudaEventCreate(&stop);
+        // cudaEventRecord(start, 0);
+
+        kernel_dsp<<<n_packets, THREADS_PER_BLOCK, FFT::shared_memory_size>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, n_packets);
+
+        // cudaEventRecord(stop, 0);
+
+        CUDA_ERR_CHK(cudaGetLastError()); // Check kernel launch errors
+
+        CUDA_ERR_CHK(cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * n_packets, cudaMemcpyDeviceToHost));
+
+        // Wait for the event to complete
+        // cudaEventSynchronize(stop);
+
+        // Calculate elapsed time in milliseconds
+        // float elapsedTime;
+        // cudaEventElapsedTime(&elapsedTime, start, stop);
+        // std::cout << "Kernel execution time: " << elapsedTime << " ms\n";
+    }
+    
+    CUDA_ERR_CHK(cudaDeviceSynchronize());
+}
+
+int main(int argc, char** argv) {
+
+    int n_iterations = 4;
+    if (argc > 1) {
+        n_iterations = std::stoi(argv[1]);
+    }
+
+    int NUM_PACKETS = 20000;
+
+    // allocate host buffer and generate test packets
     void* pktbuf_h = malloc(sizeof(rtp_packet) * NUM_PACKETS);
     void* pbuf = pktbuf_h;
     for (int i = 0; i < NUM_PACKETS; i++, pbuf += sizeof(rtp_packet)) {
@@ -122,10 +161,8 @@ int main() {
     // }
     // return 0;
 
-    // copy to device
     void* pktbuf_d;
     CUDA_ERR_CHK( cudaMalloc(&pktbuf_d, sizeof(rtp_packet) * NUM_PACKETS) );
-    CUDA_ERR_CHK( cudaMemcpy(pktbuf_d, pktbuf_h, sizeof(rtp_packet) * NUM_PACKETS, cudaMemcpyHostToDevice) );
 
     // results buffer
     void* pktspcbuf_h = malloc(sizeof(pktspectrum) * NUM_PACKETS);
@@ -133,48 +170,31 @@ int main() {
     CUDA_ERR_CHK( cudaMalloc(&pktspcbuf_d, sizeof(pktspectrum) * NUM_PACKETS) );
 
     assert(!FFT::requires_workspace);
-    printf("output_length %d\n", FFT::output_length);
-    printf("input_length %d\n", FFT::input_length);
+
+    printf("num packets %d\n", NUM_PACKETS);
+    printf("fft input_length %d\n", FFT::input_length);
+    printf("fft output_length %d\n", FFT::output_length);
+    printf("block size %d, elements per thread %d\n", ELEMENTS_PER_THREAD, THREADS_PER_BLOCK);
+    printf("per-SM shared memory size %d KB\n", FFT::shared_memory_size/1024);
+    printf("hostToDevice copy %d MB\n", sizeof(rtp_packet) * NUM_PACKETS/1024/1024);
+    printf("deviceToHost copy %d MB\n", sizeof(pktspectrum) * NUM_PACKETS/1024/1024);
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+
+    processPackets(pktbuf_h, pktbuf_d, pktspcbuf_h, pktspcbuf_d, NUM_PACKETS, n_iterations);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    auto us_per_packet = (double)duration / NUM_PACKETS / n_iterations * 1000.0;
+    printf("\niterations: %d\n", n_iterations);
+    printf("total time: %d ms (%.1f ms per iteration, %.1f μs per packet)\n", duration, (float)duration/n_iterations, us_per_packet);
 
 
-    // 1 block per packet
-    int blocks = NUM_PACKETS;
 
-
-    // Timing setup
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    cudaEventRecord(start, 0);
-
-    kernel_dsp<<<blocks, THREADS_PER_BLOCK, FFT::shared_memory_size>>>((rtp_packet*)pktbuf_d, (pktspectrum*)pktspcbuf_d, NUM_PACKETS);
-
-    cudaEventRecord(stop, 0);
-
-    CUDA_ERR_CHK(cudaGetLastError()); // Check kernel launch errors
-    CUDA_ERR_CHK(cudaDeviceSynchronize()); // Synchronize to capture runtime errors
-
-    // Wait for the event to complete
-    cudaEventSynchronize(stop);
-
-    // Calculate elapsed time in milliseconds
-    float elapsedTime;
-    cudaEventElapsedTime(&elapsedTime, start, stop);
-    std::cout << "Kernel execution time: " << elapsedTime << " ms\n";
-
-
-    // get results
-    CUDA_ERR_CHK(cudaMemcpy(pktspcbuf_h, pktspcbuf_d, sizeof(pktspectrum) * NUM_PACKETS, cudaMemcpyDeviceToHost));
-    CUDA_ERR_CHK(cudaDeviceSynchronize()); // Synchronize to capture runtime errors
-
-    // for (int i = 0; i < PC; i++) {
-    //     printf("%d\n", ((pktspectrum*)pktspcbuf_h)[i].ssrc);
-    // }
-
-    printPktSpctrm(pktspcbuf_h, 10);
-    printPktSpctrm(pktspcbuf_h, 150);
-    printPktSpctrm(pktspcbuf_h, 450);
+    // printPktSpctrm(pktspcbuf_h, 10);
+    // printPktSpctrm(pktspcbuf_h, 150);
+    // printPktSpctrm(pktspcbuf_h, 450);
 
     return 0;
 }
