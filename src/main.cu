@@ -123,11 +123,6 @@ int main(int argc, char** argv) {
         mk_rtp_packet((rtp_packet*)pbuf, ssrc);
     }
 
-    // rtp_packet p10 = ((rtp_packet*)pktbuf_h)[10];
-    // for (int i = 0; i < RTP_PAYLOAD_LEN; i++) {
-    //     printf("%d\n", p10.payload[i]);
-    // }
-    // return 0;
 
     void* pktbuf_d;
     CUDA_ERR_CHK( cudaMalloc(&pktbuf_d, sizeof(rtp_packet) * NUM_PACKETS) );
